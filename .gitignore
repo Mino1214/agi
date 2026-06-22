@@ -47,6 +47,10 @@ logs/
 **/data/cache/**
 **/data/raw/*.json
 **/data/raw/**/*.json
+**/data/research_cache/
+**/data/research_cache/**
+**/data/model_registry/
+**/data/model_registry/**
 
 # Local runtime databases and dashboards
 **/data/**/*.sqlite
