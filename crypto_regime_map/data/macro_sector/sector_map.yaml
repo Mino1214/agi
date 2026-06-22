@@ -1,0 +1,62 @@
+# Macro / Sector Watcher v0 sector tags.
+# Observation only. Alpha Long Engine v1.2 and Paper Engine do not import this file.
+
+active_universe:
+  BTCUSDT:
+    asset: BTC
+    sectors:
+      - store_of_value
+  ETHUSDT:
+    asset: ETH
+    sectors:
+      - smart_contract
+      - tokenization_infra
+  SOLUSDT:
+    asset: SOL
+    sectors:
+      - high_beta_l1
+  BNBUSDT:
+    asset: BNB
+    sectors:
+      - exchange_ecosystem
+  XRPUSDT:
+    asset: XRP
+    sectors:
+      - payments
+  LINKUSDT:
+    asset: LINK
+    sectors:
+      - oracle
+      - rwa_infra
+  AVAXUSDT:
+    asset: AVAX
+    sectors:
+      - l1
+      - institutional_subnet
+  ADAUSDT:
+    asset: ADA
+    sectors:
+      - l1
+  TONUSDT:
+    asset: TON
+    sectors:
+      - consumer_l1
+
+watchlist:
+  ONDOUSDT:
+    asset: ONDO
+    sectors:
+      - rwa
+  MKRUSDT:
+    asset: MKR
+    sectors:
+      - defi
+      - real_world_yield
+  AAVEUSDT:
+    asset: AAVE
+    sectors:
+      - defi_lending
+
+reserved_sectors:
+  - stablecoin_infra
+  - meme_high_beta

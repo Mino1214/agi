@@ -1,0 +1,97 @@
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# Local secrets and credentials
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*api_key*
+*api-key*
+*apikey*
+*exchange_key*
+*exchange-key*
+*secret*
+*secret*.json
+*secret*.yaml
+*secret*.yml
+*credential*.json
+*credential*.yaml
+*credential*.yml
+*token*.json
+*token*.yaml
+*token*.yml
+
+# Build/package artifacts
+dist/
+build/
+*.egg-info/
+
+# Runtime logs and process files
+logs/
+**/logs/
+*.log
+*.pid
+*.sock
+
+# Runtime caches
+**/data/cache/
+**/data/cache/**
+**/data/raw/*.json
+**/data/raw/**/*.json
+
+# Local runtime databases and dashboards
+**/data/**/*.sqlite
+**/data/**/*.sqlite-*
+**/data/**/*.db
+**/data/**/*.db-*
+**/data/**/*.html
+**/data/**/*.plist
+
+# Paper/live execution state
+**/data/paper*/
+**/data/paper*/**
+**/data/*state*
+**/data/*state*/**
+**/data/**/*state*.json
+**/data/**/*state*.csv
+**/data/**/*latest*.json
+**/data/**/llm_review*.json
+**/data/**/paper_*
+**/data/**/health_*.csv
+**/data/**/daily_oos_summary.csv
+**/data/**/cloudflared_*
+**/data/**/regime_server.*
+
+# Generated or large CSV outputs
+**/data/**/*.csv
+**/reports/**/*.csv
+*.csv.gz
+*.csv.zip
+
+# Large model/research artifacts
+**/models/
+**/model_artifacts/
+**/research_artifacts/
+*.pkl
+*.pickle
+*.joblib
+*.parquet
+*.feather
+*.h5
+*.hdf5
+*.onnx
+*.pt
+*.pth
+*.ckpt
+
+# Keep important markdown summaries in reports trackable.
+!**/reports/**/*.md

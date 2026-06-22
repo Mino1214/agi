@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Paper Trading Dashboard</title>
+  <link rel="stylesheet" href="/static/paper_dashboard.css">
+  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+  <script src="https://unpkg.com/lightweight-charts@4.2.3/dist/lightweight-charts.standalone.production.js"></script>
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark">PE</span>
+        <div>
+          <h1>Paper Dashboard</h1>
+          <p>Alpha Engine v1.2 · paper only</p>
+        </div>
+      </div>
+
+      <div class="market-controls">
+        <label class="select-control">
+          <span>Symbol</span>
+          <select id="chartSymbolSelect"></select>
+        </label>
+        <label class="select-control">
+          <span>Timeframe</span>
+          <select id="chartTimeframeSelect">
+            <option value="15M">15M</option>
+            <option value="1H">1H</option>
+            <option value="4H">4H</option>
+            <option value="1D">1D</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="top-status-strip" aria-label="paper status">
+        <span id="topStatusBadge" class="status-badge">-</span>
+        <span id="topRegime" class="top-pill">regime -</span>
+        <span id="topBias" class="top-pill">bias -</span>
+        <span id="topCanEnter" class="top-pill">entry -</span>
+      </div>
+
+      <div class="top-actions">
+        <div class="mode-toggle" role="group" aria-label="dashboard mode">
+          <button id="simpleModeButton" class="mode-button active" type="button">Simple</button>
+          <button id="advancedModeButton" class="mode-button" type="button">Advanced</button>
+        </div>
+        <button id="refreshButton" class="icon-button" type="button" title="Refresh">
+          <i data-lucide="refresh-cw" aria-hidden="true"></i>
+          <span>Refresh</span>
+        </button>
+      </div>
+    </header>
+
+    <div id="loadError" class="load-error" hidden></div>
+
+    <main id="dashboardRoot" class="trading-layout" data-mode="simple">
+      <section id="chartPanel" class="chart-panel">
+        <div class="chart-header">
+          <div id="chartStatus" class="chart-status"></div>
+          <div class="chart-tools">
+            <button id="chartFitButton" class="chart-tool-button" type="button" title="Fit chart">
+              <i data-lucide="scan" aria-hidden="true"></i>
+            </button>
+            <button id="chartScaleButton" class="chart-tool-button" type="button" title="Log scale">
+              <i data-lucide="line-chart" aria-hidden="true"></i>
+            </button>
+            <button id="chartFullscreenButton" class="chart-tool-button" type="button" title="Fullscreen">
+              <i data-lucide="maximize-2" aria-hidden="true"></i>
+            </button>
+            <label class="event-toggle">
+              <input id="chartEventsToggle" type="checkbox" checked>
+              <span>Events</span>
+            </label>
+          </div>
+        </div>
+        <div class="chart-shell">
+          <div id="paperChart"></div>
+          <div id="paperMarkerOverlay" aria-hidden="true"></div>
+          <div id="chartEmpty" class="chart-empty" hidden></div>
+        </div>
+      </section>
+
+      <aside class="side-panel">
+        <section class="side-card status-panel">
+          <div class="panel-head">
+            <h2>현재 상태</h2>
+            <span id="statusBadge" class="status-badge">-</span>
+          </div>
+          <div id="beginnerMessage" class="beginner-message">loading</div>
+          <div id="statusMetrics" class="compact-list"></div>
+        </section>
+
+        <section class="side-card signals-panel">
+          <div class="panel-head">
+            <h2>신호</h2>
+            <button class="detail-button" type="button" data-detail-target="advancedSignals">자세히</button>
+          </div>
+          <div id="signalSummary" class="signal-summary"></div>
+          <div id="signalCards" class="compact-list"></div>
+        </section>
+
+        <section class="side-card positions-panel">
+          <div class="panel-head">
+            <h2>포지션</h2>
+            <button class="detail-button" type="button" data-detail-target="advancedPositions">자세히</button>
+          </div>
+          <div id="positionCards" class="compact-list"></div>
+        </section>
+
+        <section class="side-card events-panel">
+          <div class="panel-head">
+            <h2>최근 이벤트</h2>
+            <button class="detail-button" type="button" data-detail-target="advancedLogs">자세히</button>
+          </div>
+          <div id="recentEvents" class="event-stack"></div>
+        </section>
+      </aside>
+
+      <section id="advancedPanel" class="advanced-panel">
+        <div class="advanced-head">
+          <h2>Advanced</h2>
+          <span>CSV · Health · Debug</span>
+        </div>
+
+        <div class="advanced-grid">
+          <section class="panel control-panel">
+            <div class="panel-head">
+              <h2>조작</h2>
+              <span id="loopBadge" class="loop-badge">loop off</span>
+            </div>
+            <div class="button-grid">
+              <button id="runOnceButton" class="control-button primary" type="button">
+                <i data-lucide="play" aria-hidden="true"></i>
+                <span>Run Once</span>
+              </button>
+              <button id="startLoopButton" class="control-button" type="button">
+                <i data-lucide="repeat" aria-hidden="true"></i>
+                <span>Start Loop</span>
+              </button>
+              <button id="stopLoopButton" class="control-button" type="button">
+                <i data-lucide="square" aria-hidden="true"></i>
+                <span>Stop Loop</span>
+              </button>
+              <button id="exportButton" class="control-button" type="button">
+                <i data-lucide="download" aria-hidden="true"></i>
+                <span>Export Logs</span>
+              </button>
+              <button id="forceCloseButton" class="control-button warning" type="button">
+                <i data-lucide="x-octagon" aria-hidden="true"></i>
+                <span>Force Close Paper Positions</span>
+              </button>
+              <button id="clearStateButton" class="control-button danger" type="button">
+                <i data-lucide="trash-2" aria-hidden="true"></i>
+                <span>Clear Paper State</span>
+              </button>
+              <button id="liveButton" class="control-button locked" type="button" disabled>
+                <i data-lucide="lock" aria-hidden="true"></i>
+                <span>Live Trading Locked</span>
+              </button>
+            </div>
+            <div id="liveLockReason" class="safety-note"></div>
+          </section>
+
+          <section class="panel metrics-panel">
+            <div class="panel-head">
+              <h2>성과 요약</h2>
+            </div>
+            <div id="performanceMetrics" class="metric-grid"></div>
+          </section>
+
+          <section id="advancedHealth" class="panel full-span health-panel">
+            <div class="panel-head">
+              <h2>Health Details</h2>
+              <span id="healthBadge" class="status-badge">-</span>
+            </div>
+            <div id="healthMessage" class="beginner-message">loading</div>
+            <div id="healthFlowSteps" class="health-flow-steps"></div>
+            <div id="healthGateCards" class="health-gate-grid"></div>
+            <div class="health-actions">
+              <button id="dataRepairButton" class="control-button primary" type="button">
+                <i data-lucide="wrench" aria-hidden="true"></i>
+                <span>데이터 복구 실행</span>
+              </button>
+              <button id="healthRecheckButton" class="control-button" type="button">
+                <i data-lucide="shield-check" aria-hidden="true"></i>
+                <span>Health 재검사</span>
+              </button>
+              <button id="healthLogButton" class="control-button" type="button">
+                <i data-lucide="list" aria-hidden="true"></i>
+                <span>상세 로그 보기</span>
+              </button>
+              <button id="manualPauseButton" class="control-button warning" type="button">
+                <i data-lucide="pause-circle" aria-hidden="true"></i>
+                <span>Manual Pause</span>
+              </button>
+              <button id="manualResumeButton" class="control-button primary" type="button">
+                <i data-lucide="rotate-ccw" aria-hidden="true"></i>
+                <span>Manual Resume</span>
+              </button>
+            </div>
+            <div id="repairStatus" class="repair-status"></div>
+            <div id="healthMetrics" class="metric-grid health-metric-grid"></div>
+            <div id="healthComponents" class="health-components"></div>
+            <div class="table-wrap health-gap-wrap">
+              <table id="healthGapTable"></table>
+            </div>
+            <div id="healthLogPreview" class="health-log-preview" hidden></div>
+          </section>
+
+          <section id="advancedSignals" class="panel full-span">
+            <div class="panel-head">
+              <h2>전체 Signal List</h2>
+              <div class="signal-view-toggle" role="group" aria-label="signal view">
+                <button id="showTopSignalsButton" class="tab-button active" type="button" data-view="top">Top 후보</button>
+                <button id="showAllSignalsButton" class="tab-button" type="button" data-view="all">전체</button>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table id="advancedSignalTable"></table>
+            </div>
+          </section>
+
+          <section id="advancedPositions" class="panel full-span">
+            <div class="panel-head">
+              <h2>전체 Position List</h2>
+            </div>
+            <div class="table-wrap">
+              <table id="advancedPositionTable"></table>
+            </div>
+          </section>
+
+          <section id="advancedLogs" class="panel full-span">
+            <div class="panel-head">
+              <h2>CSV Tables</h2>
+              <div class="tabs" role="tablist" aria-label="paper logs">
+                <button class="tab-button active" type="button" data-tab="orders">주문</button>
+                <button class="tab-button" type="button" data-tab="trades">거래</button>
+                <button class="tab-button" type="button" data-tab="signals">신호</button>
+                <button class="tab-button" type="button" data-tab="errors">오류</button>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table id="logTable"></table>
+            </div>
+          </section>
+
+          <section class="panel full-span">
+            <div class="panel-head">
+              <h2>API Response</h2>
+            </div>
+            <pre id="rawApiResponse" class="raw-response"></pre>
+          </section>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div id="toast" class="toast" hidden></div>
+  <script src="/static/paper_dashboard.js"></script>
+</body>
+</html>

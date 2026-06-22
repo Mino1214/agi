@@ -1,0 +1,1 @@
+"""Crypto regime map package."""

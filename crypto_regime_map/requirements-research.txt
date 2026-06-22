@@ -1,0 +1,9 @@
+-r requirements.txt
+
+pandas
+numpy
+scikit-learn
+lightgbm
+xgboost
+joblib
+matplotlib

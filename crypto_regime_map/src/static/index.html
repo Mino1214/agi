@@ -1,0 +1,404 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Crypto Regime Map</title>
+  <link rel="stylesheet" href="/static/styles.css">
+  <script src="https://unpkg.com/lightweight-charts@4.2.3/dist/lightweight-charts.standalone.production.js"></script>
+  <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+</head>
+<body>
+  <div class="shell">
+    <header class="topbar">
+      <div class="brand">
+        <span class="mark">RM</span>
+        <div>
+          <h1>Crypto Regime Map</h1>
+          <p>BTCUSDT · 2020-current</p>
+        </div>
+      </div>
+      <form id="controls" class="controls">
+        <label>봉
+          <select id="interval">
+            <option value="1d" selected>1D</option>
+          </select>
+        </label>
+        <button id="refreshButton" class="primary" type="submit">
+          <i data-lucide="refresh-cw" aria-hidden="true"></i>
+          <span>새로고침</span>
+        </button>
+      </form>
+    </header>
+
+    <main class="layout">
+      <section class="chart-panel">
+        <div class="chart-head">
+          <div>
+            <h2 id="chartTitle">BTCUSDT 일봉 레짐</h2>
+            <p id="chartMeta">loading</p>
+          </div>
+          <div id="latestPill" class="latest-pill">-</div>
+        </div>
+        <div class="chart-frame">
+          <div id="regimeOverlay" class="regime-overlay"></div>
+          <div id="chart"></div>
+        </div>
+        <div id="timeline" class="timeline"></div>
+        <div id="legend" class="legend"></div>
+      </section>
+
+      <aside class="side-panel">
+        <section class="panel">
+          <h2>현재 상태</h2>
+          <div id="latestSnapshot" class="snapshot"></div>
+        </section>
+        <section class="panel">
+          <h2>커서 위치</h2>
+          <div id="cursorSnapshot" class="snapshot"></div>
+        </section>
+        <section class="panel">
+          <h2>레짐 비율</h2>
+          <div id="regimeStats" class="regime-stats"></div>
+        </section>
+      </aside>
+    </main>
+
+    <section class="panel full">
+      <h2>지표 상태</h2>
+      <div id="marketSnapshot" class="metric-grid"></div>
+    </section>
+
+    <section class="report-grid">
+      <section class="panel">
+        <h2>레짐 기간 요약</h2>
+        <div class="table-wrap">
+          <table id="durationTable"></table>
+        </div>
+      </section>
+      <section class="panel">
+        <h2>레짐별 성과 요약</h2>
+        <div class="table-wrap">
+          <table id="performanceTable"></table>
+        </div>
+      </section>
+      <section class="panel">
+        <h2>레짐별 Buy & Hold - Stable</h2>
+        <div class="table-wrap">
+          <table id="stableBenchmarkTable"></table>
+        </div>
+      </section>
+      <section class="panel">
+        <h2>레짐별 Buy & Hold - Trade</h2>
+        <div class="table-wrap">
+          <table id="tradeBenchmarkTable"></table>
+        </div>
+      </section>
+      <section class="panel">
+        <h2>기존 vs 새 라벨</h2>
+        <div class="table-wrap">
+          <table id="labelMigrationTable"></table>
+        </div>
+      </section>
+      <section class="panel">
+        <h2>Action Bias 성과 - Stable</h2>
+        <div class="table-wrap">
+          <table id="stableActionBiasTable"></table>
+        </div>
+      </section>
+      <section class="panel">
+        <h2>Action Bias 성과 - Trade</h2>
+        <div class="table-wrap">
+          <table id="tradeActionBiasTable"></table>
+        </div>
+      </section>
+      <section class="panel full-span">
+        <h2>Action Bias 정책 백테스트</h2>
+        <div class="table-wrap">
+          <table id="policySummaryTable"></table>
+        </div>
+      </section>
+      <section class="panel full-span">
+        <h2>Policy Equity Curve</h2>
+        <div id="policyEquityChart" class="policy-chart"></div>
+      </section>
+      <section class="panel">
+        <h2>정책 벤치마크</h2>
+        <div class="table-wrap">
+          <table id="policyBenchmarkTable"></table>
+        </div>
+      </section>
+      <section class="panel">
+        <h2>비용 민감도</h2>
+        <div class="table-wrap">
+          <table id="policyCostTable"></table>
+        </div>
+      </section>
+      <section class="panel">
+        <h2>리밸런싱 주기 비교</h2>
+        <div class="table-wrap">
+          <table id="policyRebalanceTable"></table>
+        </div>
+      </section>
+      <section class="panel">
+        <h2>정책 연도별 수익률</h2>
+        <div class="table-wrap">
+          <table id="policyYearlyTable"></table>
+        </div>
+      </section>
+      <section class="panel full-span">
+        <h2>정책 월별 수익률</h2>
+        <div class="table-wrap">
+          <table id="policyMonthlyTable"></table>
+        </div>
+      </section>
+      <section class="panel">
+        <h2>Policy Audit Pass/Fail</h2>
+        <div class="table-wrap">
+          <table id="policyAuditPassFailTable"></table>
+        </div>
+      </section>
+      <section class="panel">
+        <h2>Benchmark 상세 비교</h2>
+        <div class="table-wrap">
+          <table id="auditBenchmarkTable"></table>
+        </div>
+      </section>
+      <section class="panel">
+        <h2>Universe 구성 요약</h2>
+        <div id="universeSummary" class="metric-grid compact"></div>
+        <div id="universeWarnings" class="check-list"></div>
+      </section>
+      <section class="panel">
+        <h2>심볼별 데이터 시작일</h2>
+        <div class="table-wrap">
+          <table id="symbolStartTable"></table>
+        </div>
+      </section>
+      <section class="panel">
+        <h2>ALT 편입/기여도</h2>
+        <div class="table-wrap">
+          <table id="altContributionTable"></table>
+        </div>
+      </section>
+      <section class="panel">
+        <h2>Universe 민감도</h2>
+        <div class="table-wrap">
+          <table id="universeSensitivityTable"></table>
+        </div>
+      </section>
+      <section class="panel">
+        <h2>Execution Timing 검증</h2>
+        <div id="executionTimingChecks" class="check-list"></div>
+        <div class="table-wrap">
+          <table id="executionTimingTable"></table>
+        </div>
+      </section>
+      <section class="panel">
+        <h2>OOS 2026-05 요약</h2>
+        <div class="table-wrap">
+          <table id="oosSummaryTable"></table>
+        </div>
+      </section>
+      <section class="panel full-span">
+        <h2>OOS 일별 포지션</h2>
+        <div class="table-wrap">
+          <table id="oosDailyTable"></table>
+        </div>
+      </section>
+      <section class="panel full-span">
+        <h2>Rolling OOS 월별 성과</h2>
+        <div class="table-wrap">
+          <table id="rollingOosTable"></table>
+        </div>
+      </section>
+      <section class="panel">
+        <h2>Simple Baseline 판정</h2>
+        <div id="simpleBaselineChecks" class="check-list"></div>
+      </section>
+      <section class="panel">
+        <h2>Simple Baseline Challenge</h2>
+        <div class="table-wrap">
+          <table id="simpleBaselineTable"></table>
+        </div>
+      </section>
+      <section class="panel">
+        <h2>Simple Rebalance 비교</h2>
+        <div class="table-wrap">
+          <table id="simpleRebalanceTable"></table>
+        </div>
+      </section>
+      <section class="panel">
+        <h2>Simple 비용 민감도</h2>
+        <div class="table-wrap">
+          <table id="simpleCostTable"></table>
+        </div>
+      </section>
+      <section class="panel">
+        <h2>Risk Normalized 승자</h2>
+        <div class="table-wrap">
+          <table id="riskWinnerTable"></table>
+        </div>
+      </section>
+      <section class="panel">
+        <h2>동일 변동성 40%</h2>
+        <div class="table-wrap">
+          <table id="sameVolatilityTable"></table>
+        </div>
+      </section>
+      <section class="panel">
+        <h2>동일 MDD 근사</h2>
+        <div class="table-wrap">
+          <table id="sameDrawdownTable"></table>
+        </div>
+      </section>
+      <section class="panel">
+        <h2>Policy 레버리지 비교</h2>
+        <div class="table-wrap">
+          <table id="policyLeverageTable"></table>
+        </div>
+      </section>
+      <section class="panel">
+        <h2>Hybrid Overlay 판정</h2>
+        <div class="table-wrap">
+          <table id="hybridPassFailTable"></table>
+        </div>
+      </section>
+      <section class="panel">
+        <h2>Hybrid Overlay Challenge</h2>
+        <div class="table-wrap">
+          <table id="hybridOverlayTable"></table>
+        </div>
+      </section>
+      <section class="panel">
+        <h2>Overlay Ablation 판정</h2>
+        <div class="table-wrap">
+          <table id="overlayAblationPassTable"></table>
+        </div>
+      </section>
+      <section class="panel">
+        <h2>Overlay Ablation</h2>
+        <div class="table-wrap">
+          <table id="overlayAblationTable"></table>
+        </div>
+      </section>
+      <section class="panel">
+        <h2>ETH Strength 민감도</h2>
+        <div id="ethStrengthSensitivityCheck" class="check-list"></div>
+        <div class="table-wrap">
+          <table id="ethStrengthSensitivityTable"></table>
+        </div>
+      </section>
+      <section class="panel">
+        <h2>ALT Universe Robustness</h2>
+        <div id="altRobustnessWarnings" class="check-list"></div>
+        <div class="table-wrap">
+          <table id="altRobustnessStartTable"></table>
+        </div>
+      </section>
+      <section class="panel">
+        <h2>ALT Leave-One-Out</h2>
+        <div class="table-wrap">
+          <table id="altLeaveOneOutTable"></table>
+        </div>
+      </section>
+      <section class="panel">
+        <h2>ALT 최소 편입 조건</h2>
+        <div class="table-wrap">
+          <table id="altMinCountTable"></table>
+        </div>
+      </section>
+      <section class="panel">
+        <h2>LargeCap/ETHStrength Fail 구간</h2>
+        <div class="table-wrap">
+          <table id="labelFailSegmentTable"></table>
+        </div>
+      </section>
+      <section class="panel">
+        <h2>Defensive/Shock Warning 구간</h2>
+        <div class="table-wrap">
+          <table id="defensiveWarningTable"></table>
+        </div>
+      </section>
+      <section class="panel">
+        <h2>ETH/BTC 설명력</h2>
+        <div class="table-wrap">
+          <table id="ethBtcStrengthTable"></table>
+        </div>
+      </section>
+      <section class="panel">
+        <h2>이벤트 구간 검증</h2>
+        <div class="table-wrap">
+          <table id="eventTable"></table>
+        </div>
+      </section>
+      <section class="panel">
+        <h2>Raw vs Stable 비교</h2>
+        <div class="table-wrap">
+          <table id="stabilityTable"></table>
+        </div>
+      </section>
+      <section class="panel">
+        <h2>수익률 비교</h2>
+        <div class="table-wrap">
+          <table id="returnCompareTable"></table>
+        </div>
+      </section>
+      <section class="panel">
+        <h2>v2 vs v3 비교</h2>
+        <div class="table-wrap">
+          <table id="v2v3SummaryTable"></table>
+        </div>
+      </section>
+      <section class="panel">
+        <h2>v2 vs v3 이벤트 위험 지연</h2>
+        <div class="table-wrap">
+          <table id="v2v3EventRiskTable"></table>
+        </div>
+      </section>
+      <section class="panel">
+        <h2>v2 vs v3 레짐별 수익률</h2>
+        <div class="table-wrap">
+          <table id="v2v3ReturnTable"></table>
+        </div>
+      </section>
+      <section class="panel">
+        <h2>2021-02-26 ~ 2021-04-22 검증</h2>
+        <div class="table-wrap">
+          <table id="observeLimitCheckTable"></table>
+        </div>
+      </section>
+      <section class="panel">
+        <h2>Observe 기간 요약</h2>
+        <div id="observeSummary" class="metric-grid compact"></div>
+        <div class="table-wrap">
+          <table id="observeLongTable"></table>
+        </div>
+      </section>
+      <section class="panel">
+        <h2>Observe 이후 전환</h2>
+        <div id="observeTransitions" class="metric-grid compact"></div>
+        <div class="table-wrap">
+          <table id="observeTransitionTable"></table>
+        </div>
+      </section>
+      <section class="panel">
+        <h2>Observe 성과</h2>
+        <div id="observePerformance" class="metric-grid compact"></div>
+      </section>
+      <section class="panel">
+        <h2>이벤트 Observe</h2>
+        <div class="table-wrap">
+          <table id="observeEventTable"></table>
+        </div>
+      </section>
+      <section class="panel">
+        <h2>룩어헤드 검증</h2>
+        <div id="lookaheadChecks" class="check-list"></div>
+      </section>
+    </section>
+  </div>
+  <div id="toast" class="toast" hidden></div>
+  <script type="module" src="/static/app.js"></script>
+</body>
+</html>
