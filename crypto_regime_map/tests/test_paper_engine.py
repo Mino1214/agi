@@ -12,6 +12,7 @@ sys.path.insert(0, str(ROOT / "src"))
 import alpha_engine_v1_2_paper_engine as paper  # noqa: E402
 import alpha_engine_v1_2_4h_regime as short_regime_4h  # noqa: E402
 import alpha_engine_v1_2_defensive_probe as defensive_probe_rules  # noqa: E402
+import v0_futures_shadow_daily_runner as shadow_runner  # noqa: E402
 import v0_futures_shadow_summary as shadow_summary  # noqa: E402
 
 
@@ -419,6 +420,109 @@ class PaperFuturesShadowTests(unittest.TestCase):
             self.assertAlmostEqual(row["size_multiplier"], 0.25)
             self.assertAlmostEqual(row["effective_exposure"], 0.75)
             self.assertFalse(state_dir.exists())
+
+    def test_daily_runner_uses_only_fixed_shadow_profiles(self):
+        calls = []
+
+        def fake_runner(state_dir, use_cache=False, now_ts=None, paper_profile=None):
+            calls.append((Path(state_dir), use_cache, now_ts, paper_profile.profile_id))
+            return {
+                "dashboard": "# fake",
+                "orders_created": 1,
+                "signals_created": 2,
+                "trades_created": 3,
+                "positions": 4,
+            }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            rows = shadow_runner.run_shadow_profiles(
+                use_cache=True,
+                now_ts=1234,
+                runner=fake_runner,
+                log_path=Path(tmp) / "runner.log",
+            )
+
+        self.assertEqual([row["profile_id"] for row in rows], ["v0_futures_3x_size25", "v0_futures_2x_size50"])
+        self.assertTrue(all(row["status"] == "success" for row in rows))
+        self.assertEqual([call[3] for call in calls], ["v0_futures_3x_size25", "v0_futures_2x_size50"])
+        self.assertTrue(all(call[1] is True for call in calls))
+        self.assertTrue(all(call[2] == 1234 for call in calls))
+        self.assertNotIn(paper.safe_resolve(paper.STATE_DIR), [paper.safe_resolve(call[0]) for call in calls])
+        self.assertTrue(all("data/research_cache" in str(call[0]) for call in calls))
+
+    def test_daily_runner_rejects_unapproved_profile_state_lookup(self):
+        with self.assertRaisesRegex(ValueError, "unsupported futures shadow profile"):
+            shadow_runner.fixed_shadow_state_dir("v0_spot_or_1x")
+
+    def test_daily_runner_writes_summary_with_fake_execution(self):
+        def fake_runner(_state_dir, use_cache=False, now_ts=None, paper_profile=None):
+            return {
+                "dashboard": "# fake",
+                "orders_created": 0,
+                "signals_created": 0,
+                "trades_created": 0,
+                "positions": 0,
+            }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "summary.md"
+            result = shadow_runner.run_daily_shadow(
+                output_path=output,
+                now_ts=1234,
+                runner=fake_runner,
+                lock_path=Path(tmp) / "runner.lock",
+                log_path=Path(tmp) / "runner.log",
+            )
+
+            text = output.read_text(encoding="utf-8")
+            self.assertEqual(result["output_path"], str(output))
+            self.assertEqual(result["exit_code"], 0)
+            self.assertIn("V0 Futures Paper Shadow Daily Run", text)
+            self.assertIn("v0_futures_3x_size25", text)
+            self.assertIn("v0_futures_2x_size50", text)
+
+    def test_daily_runner_continues_after_one_profile_failure(self):
+        calls = []
+
+        def fake_runner(_state_dir, use_cache=False, now_ts=None, paper_profile=None):
+            calls.append(paper_profile.profile_id)
+            if paper_profile.profile_id == "v0_futures_3x_size25":
+                raise RuntimeError("forced failure")
+            return {
+                "dashboard": "# fake",
+                "orders_created": 0,
+                "signals_created": 1,
+                "trades_created": 0,
+                "positions": 0,
+            }
+
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "summary.md"
+            result = shadow_runner.run_daily_shadow(
+                output_path=output,
+                now_ts=1234,
+                runner=fake_runner,
+                lock_path=Path(tmp) / "runner.lock",
+                log_path=Path(tmp) / "runner.log",
+            )
+
+            self.assertEqual(calls, ["v0_futures_3x_size25", "v0_futures_2x_size50"])
+            self.assertEqual(result["exit_code"], 1)
+            text = output.read_text(encoding="utf-8")
+            self.assertIn("failed", text)
+            self.assertIn("success", text)
+
+    def test_daily_runner_lock_blocks_duplicate_execution(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            lock_path = Path(tmp) / "runner.lock"
+            lock_path.write_text("already running\n", encoding="utf-8")
+
+            with self.assertRaises(shadow_runner.RunnerLockError):
+                shadow_runner.run_daily_shadow(
+                    output_path=Path(tmp) / "summary.md",
+                    lock_path=lock_path,
+                    log_path=Path(tmp) / "runner.log",
+                )
 
 
 def make_signal(symbol, alpha_score, rank, regime_reason="uptrend"):

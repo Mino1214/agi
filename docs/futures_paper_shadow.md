@@ -59,6 +59,72 @@ python3 crypto_regime_map/scripts/v0_futures_shadow_summary.py \
 
 Without `--output`, the summary script prints Markdown to stdout and does not write files.
 
+Run both approved shadows and write a daily summary:
+
+```bash
+python3 crypto_regime_map/scripts/v0_futures_shadow_daily_runner.py run-once \
+  --output crypto_regime_map/reports/research/v0_futures_shadow_daily_report.md
+```
+
+The daily runner has fixed state directories and runs only:
+
+- `v0_futures_3x_size25`
+- `v0_futures_2x_size50`
+
+It does not accept custom state-dir arguments.
+
+Loop mode for a Xeon research session:
+
+```bash
+python3 crypto_regime_map/scripts/v0_futures_shadow_daily_runner.py loop \
+  --sleep 3600 \
+  --output crypto_regime_map/reports/research/v0_futures_shadow_daily_report.md
+```
+
+Runner lock and log files are under ignored research cache paths:
+
+- lock: `crypto_regime_map/data/research_cache/v0_futures_shadow_daily_runner.lock`
+- log: `crypto_regime_map/data/research_cache/logs/v0_futures_shadow_daily_runner.log`
+
+The runner is cache-only for market/funding inputs. It reads existing `data/raw`
+cache but does not refresh raw market data or funding cache. This keeps the
+scheduled shadow run limited to the fixed research cache state directories and
+the ignored runner log.
+
+## Scheduling Examples
+
+Cron example:
+
+```cron
+17 * * * * cd /home/myno/바탕화면/agi/agi && /usr/bin/python3 crypto_regime_map/scripts/v0_futures_shadow_daily_runner.py run-once --output crypto_regime_map/reports/research/v0_futures_shadow_daily_report.md >> crypto_regime_map/data/research_cache/logs/v0_futures_shadow_cron.log 2>&1
+```
+
+Systemd service example:
+
+```ini
+[Unit]
+Description=V0 futures paper shadow daily runner
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/myno/바탕화면/agi/agi
+ExecStart=/usr/bin/python3 crypto_regime_map/scripts/v0_futures_shadow_daily_runner.py run-once --output crypto_regime_map/reports/research/v0_futures_shadow_daily_report.md
+```
+
+Systemd timer example:
+
+```ini
+[Unit]
+Description=Run V0 futures paper shadow daily runner hourly
+
+[Timer]
+OnCalendar=hourly
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+```
+
 ## State Separation
 
 Each state-dir contains its own `paper_positions.csv`, `paper_orders.csv`, `paper_trades.csv`, `paper_equity.csv`, `paper_signals.csv`, daily reports, health state, and `paper_profile.json`.
