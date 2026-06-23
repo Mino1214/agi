@@ -8,6 +8,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable, List
 
+from ai_researcher_runtime_sources import (
+    MACMINI_RUNTIME_JSON_PATH,
+    RuntimeSources,
+    XEON_SHADOW_RUNTIME_DIR,
+    is_normal_defensive_wait,
+    load_runtime_sources,
+)
+
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 ROOT = SCRIPT_DIR.parents[0]
@@ -30,22 +38,45 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Generate AI Researcher daily brief")
     parser.add_argument("--index-path", default=str(INDEX_PATH))
     parser.add_argument("--output-path", default=str(REPORT_PATH))
+    parser.add_argument("--runtime-json-path", default=str(MACMINI_RUNTIME_JSON_PATH))
+    parser.add_argument("--shadow-runtime-dir", default=str(XEON_SHADOW_RUNTIME_DIR))
     args = parser.parse_args()
 
-    text = generate_daily_brief(index_path=Path(args.index_path), output_path=Path(args.output_path))
+    text = generate_daily_brief(
+        index_path=Path(args.index_path),
+        output_path=Path(args.output_path),
+        runtime_json_path=Path(args.runtime_json_path),
+        shadow_runtime_dir=Path(args.shadow_runtime_dir),
+    )
     print(text)
 
 
-def generate_daily_brief(index_path: Path = INDEX_PATH, output_path: Path = REPORT_PATH) -> str:
+def generate_daily_brief(
+    index_path: Path = INDEX_PATH,
+    output_path: Path = REPORT_PATH,
+    runtime_json_path: Path = MACMINI_RUNTIME_JSON_PATH,
+    shadow_runtime_dir: Path = XEON_SHADOW_RUNTIME_DIR,
+) -> str:
     rows = load_index(index_path)
+    runtime_sources = load_runtime_sources(
+        macmini_json_path=Path(runtime_json_path),
+        shadow_runtime_dir=Path(shadow_runtime_dir),
+    )
     generated_at = utc_now_label()
-    text = build_daily_brief(rows, generated_at=generated_at)
+    text = build_daily_brief(rows, generated_at=generated_at, runtime_sources=runtime_sources)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(text, encoding="utf-8")
     return text
 
 
-def build_daily_brief(rows: List[dict], generated_at: str) -> str:
+def build_daily_brief(
+    rows: List[dict],
+    generated_at: str,
+    runtime_sources: RuntimeSources | None = None,
+) -> str:
+    if runtime_sources is None:
+        runtime_sources = load_runtime_sources()
+
     pass_rows = rows_by_verdict(rows, "PASS")
     fail_rows = rows_by_verdict(rows, "FAIL")
     watch_rows = rows_by_verdict(rows, "WATCH")
@@ -85,6 +116,7 @@ def build_daily_brief(rows: List[dict], generated_at: str) -> str:
         "- 둘 다 production/live 주문 후보가 아니라 shadow 관찰 후보이다.",
         *format_rows(futures_rows, empty="- futures shadow worktree report는 현재 인덱스에 없다."),
         "",
+        *format_macmini_runtime_section(runtime_sources),
         "## 5. 오늘 확인할 항목",
         "",
         "- sibling research worktree에 새 markdown report가 생겼는지 확인한다.",
@@ -154,6 +186,79 @@ def truncate(text: str, limit: int) -> str:
     if len(text) <= limit:
         return text
     return text[: limit - 3].rstrip() + "..."
+
+
+def format_macmini_runtime_section(runtime_sources: RuntimeSources) -> List[str]:
+    runtime = runtime_sources.macmini
+    lines = [
+        "## Mac mini V1.2 Paper Runtime",
+        "",
+    ]
+
+    if not runtime.available:
+        lines.extend(
+            [
+                f"- status: {runtime.warning or 'Mac mini runtime summary not available'}",
+                f"- source: {runtime.source_path}",
+                f"- xeon_shadow_runtime: {format_shadow_runtime_status(runtime_sources)}",
+                "",
+            ]
+        )
+        return lines
+
+    lines.extend(
+        [
+            "- status: available",
+            f"- source: {runtime.source_path}",
+            f"- timestamp: {format_value(runtime.timestamp)}",
+            f"- equity: {format_value(runtime.current_equity)}",
+            f"- daily return: {format_pct(runtime.daily_return_pct)}",
+            f"- open positions: {format_value(runtime.open_positions)}",
+            f"- orders/trades count: {format_value(runtime.orders_count)} / {format_value(runtime.trades_count)}",
+            f"- regime: {format_value(runtime.current_regime)}",
+            f"- action_bias: {format_value(runtime.action_bias)}",
+            f"- can_enter: {format_bool(runtime.can_enter)}",
+            f"- entry_block_reason: {format_value(runtime.entry_block_reason)}",
+            f"- health_status: {format_value(runtime.health_status)}",
+            f"- warnings_count: {format_value(runtime.warnings_count)}",
+            f"- last updated: {format_value(runtime.last_updated_time)}",
+            f"- xeon_shadow_runtime: {format_shadow_runtime_status(runtime_sources)}",
+        ]
+    )
+    if is_normal_defensive_wait(runtime):
+        lines.append(
+            "- interpretation: defensive/reduce_risk 상태에서 can_enter=false, 포지션/주문/체결 0건이므로 "
+            "신규 진입 없음은 전략상 정상 대기 상태이다."
+        )
+    lines.append("")
+    return lines
+
+
+def format_shadow_runtime_status(runtime_sources: RuntimeSources) -> str:
+    shadow = runtime_sources.shadow
+    if shadow.available:
+        return f"available ({len(shadow.summary_files)} summary files)"
+    return shadow.warning or "not available"
+
+
+def format_value(value) -> str:
+    if value is None or value == "":
+        return "unknown"
+    return str(value)
+
+
+def format_pct(value) -> str:
+    if value is None or value == "":
+        return "unknown"
+    return f"{value}%"
+
+
+def format_bool(value) -> str:
+    if value is True:
+        return "true"
+    if value is False:
+        return "false"
+    return "unknown"
 
 
 def utc_now_label() -> str:

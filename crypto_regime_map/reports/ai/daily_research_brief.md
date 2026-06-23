@@ -1,6 +1,6 @@
 # AI Researcher Daily Brief
 
-- generated_at: 2026-06-23T11:56:55Z
+- generated_at: 2026-06-23T12:55:07Z
 - indexed_reports: 16
 - role: read-only researcher/auditor
 
@@ -37,6 +37,25 @@
 - futures_shadow: V0 Futures Paper Shadow Daily Run (../agi-futures-shadow/crypto_regime_map/reports/research/v0_futures_shadow_daily_report.md) - - V0 current: `/home/myno/바탕화면/agi/agi/crypto_regime_map/data/paper_alpha_engine_v1_2` - futures 3x size25: `/home/myno/바탕화면/agi/agi/crypto_regime_map/data/research_cache/paper_...
 - futures_shadow: V0 Futures Paper Shadow Summary (../agi-futures-shadow/crypto_regime_map/reports/research/v0_futures_shadow_first_run.md) - - V0 current: `/home/myno/바탕화면/agi/agi/crypto_regime_map/data/paper_alpha_engine_v1_2` - futures 3x size25: `/home/myno/바탕화면/agi/agi/crypto_regime_map/data/research_cache/paper_...
 - futures_shadow: V0 Futures Paper Shadow Setup Report (../agi-futures-shadow/crypto_regime_map/reports/research/v0_futures_shadow_setup_report.md) - Prepare paper-only futures shadow execution for V0 baseline candidates without changing the default V0 paper path, live order logic, or existing research outputs.
+
+## Mac mini V1.2 Paper Runtime
+
+- status: available
+- source: /Users/myno/agi-lab/runtime/macmini-paper/v1_2_paper_runtime_summary.json
+- timestamp: 2026-06-23T12:15:55+00:00
+- equity: 1.0
+- daily return: 0.0%
+- open positions: 0
+- orders/trades count: 0 / 0
+- regime: defensive
+- action_bias: reduce_risk
+- can_enter: false
+- entry_block_reason: regime_reduce_risk
+- health_status: warning
+- warnings_count: 17
+- last updated: 2026-06-23 12:15 UTC
+- xeon_shadow_runtime: Xeon shadow runtime summary not available
+- interpretation: defensive/reduce_risk 상태에서 can_enter=false, 포지션/주문/체결 0건이므로 신규 진입 없음은 전략상 정상 대기 상태이다.
 
 ## 5. 오늘 확인할 항목
 

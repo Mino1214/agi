@@ -14,6 +14,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 import ai_researcher_daily_brief as daily  # noqa: E402
 import ai_researcher_index_reports as indexer  # noqa: E402
 import ai_researcher_next_actions as next_actions  # noqa: E402
+import ai_researcher_runtime_sources as runtime_sources  # noqa: E402
 
 
 class AiResearcherTests(unittest.TestCase):
@@ -92,6 +93,7 @@ ML regime did not beat the V0 baseline.
             tmp_path = Path(tmp)
             index_path = tmp_path / "report_index.jsonl"
             output_path = tmp_path / "daily_research_brief.md"
+            runtime_path = tmp_path / "v1_2_paper_runtime_summary.json"
             write_jsonl(
                 index_path,
                 [
@@ -117,11 +119,18 @@ ML regime did not beat the V0 baseline.
                     },
                 ],
             )
+            write_runtime_json(runtime_path)
 
-            text = daily.generate_daily_brief(index_path=index_path, output_path=output_path)
+            text = daily.generate_daily_brief(
+                index_path=index_path,
+                output_path=output_path,
+                runtime_json_path=runtime_path,
+                shadow_runtime_dir=tmp_path / "missing-shadow",
+            )
 
             self.assertTrue(output_path.exists())
             self.assertIn("## 1. 현재 생존 전략", text)
+            self.assertIn("## Mac mini V1.2 Paper Runtime", text)
             self.assertIn("## 7. 금지해야 할 액션", text)
             self.assertIn("V0 1D regime = 현재 생존 기준선", text)
             self.assertIn("ML Regime: FAIL", text)
@@ -134,6 +143,7 @@ ML regime did not beat the V0 baseline.
             index_path = tmp_path / "report_index.jsonl"
             daily_path = tmp_path / "daily.md"
             output_path = tmp_path / "next_actions.md"
+            runtime_path = tmp_path / "v1_2_paper_runtime_summary.json"
             write_jsonl(
                 index_path,
                 [
@@ -142,11 +152,14 @@ ML regime did not beat the V0 baseline.
                 ],
             )
             daily_path.write_text("# Daily\n\nV0 baseline.", encoding="utf-8")
+            write_runtime_json(runtime_path)
 
             text = next_actions.generate_next_actions(
                 index_path=index_path,
                 daily_brief_path=daily_path,
                 output_path=output_path,
+                runtime_json_path=runtime_path,
+                shadow_runtime_dir=tmp_path / "missing-shadow",
             )
 
             self.assertTrue(output_path.exists())
@@ -162,6 +175,110 @@ ML regime did not beat the V0 baseline.
             self.assertEqual(positions, sorted(positions))
             self.assertIn("paper/live engine 실행 금지", text)
             self.assertIn("futures_shadow_reports: 1", text)
+            self.assertIn("V1.2 paper는 defensive/reduce_risk 상태라 신규 진입 없음이 정상이다.", text)
+            self.assertIn("warning detail expansion", text)
+
+    def test_macmini_runtime_json_parsing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime_path = Path(tmp) / "v1_2_paper_runtime_summary.json"
+            write_runtime_json(runtime_path)
+
+            summary = runtime_sources.load_macmini_runtime_summary(runtime_path)
+
+            self.assertTrue(summary.available)
+            self.assertEqual(summary.timestamp, "2026-06-23T12:15:55+00:00")
+            self.assertEqual(summary.current_equity, 1.0)
+            self.assertEqual(summary.daily_return_pct, 0.0)
+            self.assertEqual(summary.open_positions, 0)
+            self.assertEqual(summary.orders_count, 0)
+            self.assertEqual(summary.trades_count, 0)
+            self.assertEqual(summary.current_regime, "defensive")
+            self.assertEqual(summary.action_bias, "reduce_risk")
+            self.assertIs(summary.can_enter, False)
+            self.assertEqual(summary.entry_block_reason, "regime_reduce_risk")
+            self.assertEqual(summary.health_status, "warning")
+            self.assertEqual(summary.warnings_count, 1)
+            self.assertEqual(summary.last_updated_time, "2026-06-23 12:15 UTC")
+
+    def test_runtime_missing_falls_back_without_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            sources = runtime_sources.load_runtime_sources(
+                macmini_json_path=tmp_path / "missing_runtime.json",
+                shadow_runtime_dir=tmp_path / "missing-shadow",
+            )
+
+            text = daily.build_daily_brief([], generated_at="2026-06-23T00:00:00Z", runtime_sources=sources)
+
+            self.assertFalse(sources.macmini.available)
+            self.assertIn("Mac mini runtime summary not available", text)
+            self.assertIn("xeon_shadow_runtime: Xeon shadow runtime summary not available", text)
+
+    def test_runtime_invalid_json_warns_and_continues(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            runtime_path = tmp_path / "broken.json"
+            runtime_path.write_text("{not-json", encoding="utf-8")
+            sources = runtime_sources.load_runtime_sources(
+                macmini_json_path=runtime_path,
+                shadow_runtime_dir=tmp_path / "missing-shadow",
+            )
+
+            text = daily.build_daily_brief([], generated_at="2026-06-23T00:00:00Z", runtime_sources=sources)
+
+            self.assertFalse(sources.macmini.available)
+            self.assertIn("Mac mini runtime JSON parse failed", text)
+
+    def test_daily_brief_v1_2_runtime_section_interprets_defensive_wait(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            index_path = tmp_path / "report_index.jsonl"
+            output_path = tmp_path / "daily_research_brief.md"
+            runtime_path = tmp_path / "v1_2_paper_runtime_summary.json"
+            write_jsonl(index_path, [])
+            write_runtime_json(runtime_path)
+
+            text = daily.generate_daily_brief(
+                index_path=index_path,
+                output_path=output_path,
+                runtime_json_path=runtime_path,
+                shadow_runtime_dir=tmp_path / "missing-shadow",
+            )
+
+            self.assertIn("## Mac mini V1.2 Paper Runtime", text)
+            self.assertIn("- equity: 1.0", text)
+            self.assertIn("- daily return: 0.0%", text)
+            self.assertIn("- open positions: 0", text)
+            self.assertIn("- orders/trades count: 0 / 0", text)
+            self.assertIn("- regime: defensive", text)
+            self.assertIn("- action_bias: reduce_risk", text)
+            self.assertIn("- can_enter: false", text)
+            self.assertIn("- entry_block_reason: regime_reduce_risk", text)
+            self.assertIn("- health_status: warning", text)
+            self.assertIn("- warnings_count: 1", text)
+            self.assertIn("- last updated: 2026-06-23 12:15 UTC", text)
+            self.assertIn("전략상 정상 대기 상태", text)
+
+    def test_runtime_source_file_is_not_modified(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            index_path = tmp_path / "report_index.jsonl"
+            output_path = tmp_path / "daily_research_brief.md"
+            runtime_path = tmp_path / "v1_2_paper_runtime_summary.json"
+            write_jsonl(index_path, [])
+            write_runtime_json(runtime_path)
+            before_bytes = runtime_path.read_bytes()
+            before_mtime_ns = runtime_path.stat().st_mtime_ns
+
+            daily.generate_daily_brief(
+                index_path=index_path,
+                output_path=output_path,
+                runtime_json_path=runtime_path,
+                shadow_runtime_dir=tmp_path / "missing-shadow",
+            )
+
+            self.assertEqual(runtime_path.read_bytes(), before_bytes)
+            self.assertEqual(runtime_path.stat().st_mtime_ns, before_mtime_ns)
 
     def test_source_report_is_not_modified(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -214,6 +331,33 @@ def write_jsonl(path: Path, rows) -> None:
         for row in rows:
             handle.write(json.dumps(row, ensure_ascii=False))
             handle.write("\n")
+
+
+def write_runtime_json(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "timestamp": "2026-06-23T12:15:55+00:00",
+        "current_equity": 1.0,
+        "daily_return_pct": 0.0,
+        "open_positions": {"count": 0, "positions": []},
+        "orders_count": 0,
+        "trades_count": 0,
+        "current_regime": "defensive",
+        "action_bias": "reduce_risk",
+        "can_enter": False,
+        "entry_block_reason": "regime_reduce_risk",
+        "health_status": "warning",
+        "latest_warnings": [
+            {
+                "status": "warning",
+                "section": "data",
+                "code": "missing_candles",
+                "message": "BTCUSDT 1h candles missing.",
+            }
+        ],
+        "last_updated_time": "2026-06-23 12:15 UTC",
+    }
+    path.write_text(json.dumps(payload, ensure_ascii=False, sort_keys=True), encoding="utf-8")
 
 
 if __name__ == "__main__":
