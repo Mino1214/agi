@@ -45,6 +45,8 @@ logs/
 # Runtime caches
 **/data/cache/
 **/data/cache/**
+**/data/ai_researcher/
+**/data/ai_researcher/**
 **/data/raw/*.json
 **/data/raw/**/*.json
 
