@@ -1,6 +1,6 @@
 # AI Researcher Next Actions
 
-- generated_at: 2026-06-23T12:55:07Z
+- generated_at: 2026-06-23T13:44:34Z
 - indexed_reports: 16
 - daily_brief_available: yes
 - detected_fail_reports: 6
@@ -8,7 +8,7 @@
 - futures_shadow_reports: 3
 - macmini_runtime_available: yes
 - macmini_runtime_regime: defensive
-- macmini_runtime_warnings_count: 17
+- macmini_runtime_warnings_count: 16
 
 ## Priority 1. 운영 안정성
 

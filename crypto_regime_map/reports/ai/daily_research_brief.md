@@ -1,6 +1,6 @@
 # AI Researcher Daily Brief
 
-- generated_at: 2026-06-23T12:55:07Z
+- generated_at: 2026-06-23T13:44:33Z
 - indexed_reports: 16
 - role: read-only researcher/auditor
 
@@ -42,7 +42,7 @@
 
 - status: available
 - source: /Users/myno/agi-lab/runtime/macmini-paper/v1_2_paper_runtime_summary.json
-- timestamp: 2026-06-23T12:15:55+00:00
+- timestamp: 2026-06-23T13:42:27+00:00
 - equity: 1.0
 - daily return: 0.0%
 - open positions: 0
@@ -52,9 +52,9 @@
 - can_enter: false
 - entry_block_reason: regime_reduce_risk
 - health_status: warning
-- warnings_count: 17
-- last updated: 2026-06-23 12:15 UTC
-- xeon_shadow_runtime: Xeon shadow runtime summary not available
+- warnings_count: 16
+- last updated: 2026-06-23 13:42 UTC
+- xeon_shadow_runtime: Xeon shadow runtime directory has no summary files
 - interpretation: defensive/reduce_risk 상태에서 can_enter=false, 포지션/주문/체결 0건이므로 신규 진입 없음은 전략상 정상 대기 상태이다.
 
 ## 5. 오늘 확인할 항목
