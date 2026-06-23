@@ -12,6 +12,7 @@ sys.path.insert(0, str(ROOT / "src"))
 import alpha_engine_v1_2_paper_engine as paper  # noqa: E402
 import alpha_engine_v1_2_4h_regime as short_regime_4h  # noqa: E402
 import alpha_engine_v1_2_defensive_probe as defensive_probe_rules  # noqa: E402
+import v0_futures_shadow_summary as shadow_summary  # noqa: E402
 
 
 class PaperSignalSelectionTests(unittest.TestCase):
@@ -319,6 +320,107 @@ class PaperLeverageTests(unittest.TestCase):
                 self.assertEqual(paper.applied_leverage_from_raw(raw), expected)
 
 
+class PaperFuturesShadowTests(unittest.TestCase):
+    def test_default_profile_leaves_order_and_config_on_v0_path(self):
+        order = paper.make_order(make_order_signal(), 2000)
+
+        self.assertEqual(order["size_multiplier"], "")
+        self.assertNotIn("exchange_leverage", order)
+        self.assertIs(paper.paper_config_for_profile(paper.DEFAULT_PAPER_PROFILE), paper.PAPER_CONFIG)
+        self.assertEqual(paper.applied_leverage_for_profile(paper.DEFAULT_PAPER_PROFILE, 2.4), 3)
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir = Path(tmp)
+            paper.ensure_paper_profile_state(state_dir, paper.DEFAULT_PAPER_PROFILE, 2000)
+            self.assertFalse((state_dir / paper.PAPER_PROFILE_STATE_NAME).exists())
+
+    def test_futures_profile_sets_size_and_exchange_leverage(self):
+        profile = paper.paper_profile_for_id("v0_futures_3x_size25")
+
+        order = paper.make_order(make_order_signal(), 2000, paper_profile=profile)
+        config = paper.paper_config_for_profile(profile)
+
+        self.assertEqual(order["paper_profile"], "v0_futures_3x_size25")
+        self.assertEqual(order["exchange_leverage"], 3)
+        self.assertAlmostEqual(order["size_multiplier"], 0.25)
+        self.assertAlmostEqual(order["effective_exposure"], 0.75)
+        self.assertEqual(config.market_data, "futures_shadow")
+        self.assertEqual(config.global_max_leverage, 3.0)
+        self.assertFalse(config.variant.require_liquidation_buffer)
+        self.assertEqual(paper.applied_leverage_for_profile(profile, 0.4), 3)
+
+    def test_futures_profile_requires_explicit_separate_state_dir(self):
+        with self.assertRaisesRegex(ValueError, "explicit separate --state-dir"):
+            paper.prepare_paper_profile_run("v0_futures_3x_size25", paper.STATE_DIR, state_dir_is_explicit=False)
+
+        with self.assertRaisesRegex(ValueError, "existing V0 paper state-dir"):
+            paper.prepare_paper_profile_run("v0_futures_3x_size25", paper.STATE_DIR, state_dir_is_explicit=True)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = paper.prepare_paper_profile_run("v0_futures_3x_size25", Path(tmp), state_dir_is_explicit=True)
+            self.assertEqual(profile.profile_id, "v0_futures_3x_size25")
+
+    def test_futures_profile_rejects_non_v0_variants(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir = Path(tmp)
+            with self.assertRaisesRegex(ValueError, "defensive-probe"):
+                paper.prepare_paper_profile_run(
+                    "v0_futures_3x_size25",
+                    state_dir,
+                    state_dir_is_explicit=True,
+                    defensive_probe=True,
+                )
+            with self.assertRaisesRegex(ValueError, "V0 1D baseline only"):
+                paper.prepare_paper_profile_run(
+                    "v0_futures_3x_size25",
+                    state_dir,
+                    state_dir_is_explicit=True,
+                    regime_timeframe="4h",
+                )
+
+    def test_invalid_futures_risk_profiles_are_blocked(self):
+        invalid_profiles = [
+            paper.PaperProfile("bad_5x", "bad", 5, 0.10, futures_shadow=True),
+            paper.PaperProfile("bad_eff", "bad", 3, 0.34, futures_shadow=True),
+            paper.PaperProfile("bad_2x75", "bad", 2, 0.75, futures_shadow=True),
+            paper.PaperProfile("bad_3x50", "bad", 3, 0.50, futures_shadow=True),
+            paper.PaperProfile("bad_pure_2x", "bad", 2, 1.00, futures_shadow=True),
+            paper.PaperProfile("bad_liquidation", "bad", 2, 0.25, futures_shadow=True, liquidation_touch=True),
+        ]
+
+        for profile in invalid_profiles:
+            with self.subTest(profile=profile.profile_id):
+                with self.assertRaises(ValueError):
+                    paper.validate_paper_profile(profile)
+
+    def test_shadow_profile_state_locks_state_dir(self):
+        profile = paper.paper_profile_for_id("v0_futures_3x_size25")
+        other = paper.paper_profile_for_id("v0_futures_2x_size50")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir = Path(tmp)
+            paper.ensure_paper_profile_state(state_dir, profile, 2000)
+            state = paper.load_paper_profile_state(state_dir)
+
+            self.assertEqual(state["paper_profile"], "v0_futures_3x_size25")
+            self.assertEqual(state["exchange_leverage"], 3)
+            self.assertAlmostEqual(state["effective_exposure"], 0.75)
+            self.assertTrue(any("exchange_leverage: 3x" in line for line in paper.paper_profile_report_lines(state_dir)))
+            with self.assertRaisesRegex(ValueError, "locked to paper profile"):
+                paper.ensure_paper_profile_state(state_dir, other, 3000)
+
+    def test_shadow_summary_reads_missing_state_without_mutating(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            state_dir = Path(tmp) / "missing_state"
+            row = shadow_summary.summarize_state("missing", "v0_futures_3x_size25", state_dir)
+
+            self.assertFalse(row["state_exists"])
+            self.assertEqual(row["profile"], "v0_futures_3x_size25")
+            self.assertEqual(row["exchange_leverage"], 3.0)
+            self.assertAlmostEqual(row["size_multiplier"], 0.25)
+            self.assertAlmostEqual(row["effective_exposure"], 0.75)
+            self.assertFalse(state_dir.exists())
+
+
 def make_signal(symbol, alpha_score, rank, regime_reason="uptrend"):
     return {
         "symbol": symbol,
@@ -330,6 +432,19 @@ def make_signal(symbol, alpha_score, rank, regime_reason="uptrend"):
         "alpha_score": alpha_score,
         "rank": rank,
         "universe_size": 7,
+    }
+
+
+def make_order_signal():
+    return {
+        "signal_id": "sig_v1_2_btc_2000",
+        "symbol": "BTCUSDT",
+        "alpha_score": 8.0,
+        "signal_time": 2000,
+        "signal_date": "1970-01-01 00:33",
+        "fill_time": 2000,
+        "trade_regime": "uptrend",
+        "trade_action_bias": "long_allowed",
     }
 
 

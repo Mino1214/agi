@@ -14,6 +14,7 @@ import math
 import sys
 import time
 from collections import defaultdict
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Tuple
@@ -48,6 +49,7 @@ TOP_SCORE_PCT = 0.20
 INITIAL_CASH = 1.0
 DAILY_REPORT_NAME = "paper_daily_report.md"
 HEALTH_STATE_NAME = "health_state.json"
+PAPER_PROFILE_STATE_NAME = "paper_profile.json"
 STRATEGY_LOCK_NAME = "Alpha Long Engine v1.2 No Hedge"
 STRATEGY_LOCK_VERSION = "v1.2-no-hedge"
 
@@ -64,6 +66,63 @@ PAPER_CONFIG = rb.RunConfig(
     slippage_rate=SLIPPAGE_RATE,
     fee_rate=TAKER_FEE_RATE,
 )
+
+
+@dataclass(frozen=True)
+class PaperProfile:
+    profile_id: str
+    label: str
+    exchange_leverage: int
+    size_multiplier: float
+    futures_shadow: bool = False
+    liquidation_touch: bool = False
+
+    @property
+    def effective_exposure(self) -> float:
+        return self.exchange_leverage * self.size_multiplier
+
+    def state_row(self) -> dict:
+        return {
+            "paper_profile": self.profile_id,
+            "label": self.label,
+            "exchange_leverage": self.exchange_leverage,
+            "size_multiplier": self.size_multiplier,
+            "effective_exposure": self.effective_exposure,
+            "mode": "futures_paper_shadow" if self.futures_shadow else "spot_or_1x_paper",
+            "futures_shadow": self.futures_shadow,
+            "liquidation_touch": self.liquidation_touch,
+        }
+
+
+DEFAULT_PAPER_PROFILE_ID = "v0_spot_or_1x"
+PAPER_PROFILES = {
+    DEFAULT_PAPER_PROFILE_ID: PaperProfile(
+        profile_id=DEFAULT_PAPER_PROFILE_ID,
+        label="V0_SPOT_OR_1X",
+        exchange_leverage=1,
+        size_multiplier=1.0,
+        futures_shadow=False,
+    ),
+    "v0_futures_3x_size25": PaperProfile(
+        profile_id="v0_futures_3x_size25",
+        label="V0_FUTURES_3X_SIZE25",
+        exchange_leverage=3,
+        size_multiplier=0.25,
+        futures_shadow=True,
+    ),
+    "v0_futures_2x_size50": PaperProfile(
+        profile_id="v0_futures_2x_size50",
+        label="V0_FUTURES_2X_SIZE50",
+        exchange_leverage=2,
+        size_multiplier=0.50,
+        futures_shadow=True,
+    ),
+}
+DEFAULT_PAPER_PROFILE = PAPER_PROFILES[DEFAULT_PAPER_PROFILE_ID]
+FUTURES_SHADOW_STATE_DIRS = {
+    "v0_futures_3x_size25": ROOT / "data" / "research_cache" / "paper_v0_futures_3x_size25",
+    "v0_futures_2x_size50": ROOT / "data" / "research_cache" / "paper_v0_futures_2x_size50",
+}
 
 POSITION_FIELDS = [
     "position_id",
@@ -224,21 +283,42 @@ STATE_FILES = {
 def main() -> None:
     parser = argparse.ArgumentParser(description="Alpha Engine v1.2 paper trading engine")
     parser.add_argument("command", nargs="?", choices=["run-once", "loop", "dashboard", "report"], default="run-once")
-    parser.add_argument("--state-dir", default=str(STATE_DIR))
+    parser.add_argument("--state-dir", default=None)
     parser.add_argument("--use-cache", action="store_true", help="Use cached OHLCV/funding data when it is current enough.")
     parser.add_argument("--sleep", type=int, default=3600, help="Loop sleep seconds.")
     parser.add_argument("--iterations", type=int, default=0, help="Loop iterations. 0 means forever.")
     parser.add_argument("--defensive-probe", action="store_true", help="Run the separate defensive_probe test variant.")
     parser.add_argument("--regime-timeframe", choices=["1d", "4h"], default="1d", help="Use the default 1D regime or the experimental BTC 4H short regime.")
     parser.add_argument("--short-regime-4h", action="store_true", help="Alias for --regime-timeframe 4h.")
+    parser.add_argument(
+        "--paper-profile",
+        choices=sorted(PAPER_PROFILES),
+        default=DEFAULT_PAPER_PROFILE_ID,
+        help="Paper execution profile. Futures shadow profiles are disabled unless explicitly selected.",
+    )
     args = parser.parse_args()
 
     regime_timeframe = "4h" if args.short_regime_4h else args.regime_timeframe
-    state_dir = Path(args.state_dir)
-    if args.defensive_probe and args.state_dir == str(STATE_DIR):
+    state_dir_is_explicit = args.state_dir is not None
+    state_dir = Path(args.state_dir) if args.state_dir else STATE_DIR
+    default_profile_requested = args.paper_profile == DEFAULT_PAPER_PROFILE_ID
+    default_state_requested = safe_resolve(state_dir) == safe_resolve(STATE_DIR)
+    if args.defensive_probe and default_profile_requested and default_state_requested:
         state_dir = DEFENSIVE_PROBE_STATE_DIR
-    if regime_timeframe == "4h" and args.state_dir == str(STATE_DIR):
+        state_dir_is_explicit = False
+    if regime_timeframe == "4h" and default_profile_requested and default_state_requested:
         state_dir = SHORT_REGIME_4H_STATE_DIR
+        state_dir_is_explicit = False
+    try:
+        paper_profile = prepare_paper_profile_run(
+            args.paper_profile,
+            state_dir,
+            state_dir_is_explicit=state_dir_is_explicit,
+            defensive_probe=args.defensive_probe,
+            regime_timeframe=regime_timeframe,
+        )
+    except ValueError as exc:
+        parser.error(str(exc))
     if args.command == "dashboard":
         print(build_dashboard(state_dir))
         return
@@ -248,7 +328,13 @@ def main() -> None:
     if args.command == "loop":
         iterations = 0
         while args.iterations <= 0 or iterations < args.iterations:
-            result = run_once(state_dir, use_cache=args.use_cache, defensive_probe=args.defensive_probe, regime_timeframe=regime_timeframe)
+            result = run_once(
+                state_dir,
+                use_cache=args.use_cache,
+                defensive_probe=args.defensive_probe,
+                regime_timeframe=regime_timeframe,
+                paper_profile=paper_profile,
+            )
             print(result["dashboard"], flush=True)
             iterations += 1
             if args.iterations > 0 and iterations >= args.iterations:
@@ -256,8 +342,109 @@ def main() -> None:
             time.sleep(args.sleep)
         return
 
-    result = run_once(state_dir, use_cache=args.use_cache, defensive_probe=args.defensive_probe, regime_timeframe=regime_timeframe)
+    result = run_once(
+        state_dir,
+        use_cache=args.use_cache,
+        defensive_probe=args.defensive_probe,
+        regime_timeframe=regime_timeframe,
+        paper_profile=paper_profile,
+    )
     print(result["dashboard"])
+
+
+def paper_profile_for_id(profile_id: Optional[str]) -> PaperProfile:
+    key = profile_id or DEFAULT_PAPER_PROFILE_ID
+    try:
+        return PAPER_PROFILES[key]
+    except KeyError as exc:
+        raise ValueError(f"unsupported paper profile: {profile_id}") from exc
+
+
+def prepare_paper_profile_run(
+    profile_id: Optional[str],
+    state_dir: Path,
+    state_dir_is_explicit: bool,
+    defensive_probe: bool = False,
+    regime_timeframe: str = "1d",
+) -> PaperProfile:
+    profile = paper_profile_for_id(profile_id)
+    validate_paper_profile(profile)
+    validate_paper_profile_state_dir(profile, state_dir, state_dir_is_explicit)
+    if profile.futures_shadow and defensive_probe:
+        raise ValueError("futures shadow profiles cannot be combined with --defensive-probe")
+    if profile.futures_shadow and normalize_regime_timeframe(regime_timeframe) != "1d":
+        raise ValueError("futures shadow profiles are V0 1D baseline only")
+    return profile
+
+
+def validate_paper_profile(profile: PaperProfile) -> None:
+    if int(profile.exchange_leverage) != profile.exchange_leverage or profile.exchange_leverage < 1:
+        raise ValueError("exchange leverage must be a positive integer")
+    if profile.exchange_leverage > 3:
+        raise ValueError("risk policy violation: max_exchange_leverage is 3")
+    if profile.exchange_leverage >= 5:
+        raise ValueError("risk policy violation: 5x is disabled")
+    if profile.size_multiplier <= 0:
+        raise ValueError("size_multiplier must be positive")
+    if profile.effective_exposure > 1.0 + 1e-12:
+        raise ValueError("risk policy violation: max_effective_exposure is 1.0")
+    if profile.liquidation_touch:
+        raise ValueError("risk policy violation: liquidation touch profiles are disabled")
+    if profile.exchange_leverage == 2 and profile.size_multiplier >= 0.75 - 1e-12:
+        raise ValueError("risk policy violation: 2x size 75% or higher is disabled")
+    if profile.exchange_leverage == 3 and profile.size_multiplier >= 0.50 - 1e-12:
+        raise ValueError("risk policy violation: 3x size 50% or higher is disabled")
+    if profile.exchange_leverage >= 2 and profile.size_multiplier >= 1.0 - 1e-12:
+        raise ValueError("risk policy violation: pure 2x+ exposure is disabled")
+
+
+def validate_paper_profile_state_dir(profile: PaperProfile, state_dir: Path, state_dir_is_explicit: bool) -> None:
+    if not profile.futures_shadow:
+        return
+    if not state_dir_is_explicit:
+        raise ValueError("futures shadow profiles require an explicit separate --state-dir")
+
+    state_path = safe_resolve(state_dir)
+    forbidden = {
+        safe_resolve(STATE_DIR),
+        safe_resolve(DEFENSIVE_PROBE_STATE_DIR),
+        safe_resolve(SHORT_REGIME_4H_STATE_DIR),
+    }
+    if state_path in forbidden:
+        raise ValueError("futures shadow profiles cannot use an existing V0 paper state-dir")
+
+    for profile_id, expected_dir in FUTURES_SHADOW_STATE_DIRS.items():
+        if profile_id != profile.profile_id and state_path == safe_resolve(expected_dir):
+            raise ValueError(f"state-dir belongs to a different futures shadow profile: {profile_id}")
+
+
+def paper_config_for_profile(profile: PaperProfile) -> rb.RunConfig:
+    if not profile.futures_shadow:
+        return PAPER_CONFIG
+    variant = rb.RobustVariant(
+        profile.label,
+        exclude_doge=True,
+        top_score_pct=TOP_SCORE_PCT,
+        require_liquidation_buffer=False,
+        group="PaperShadow",
+    )
+    return rb.RunConfig(
+        variant=variant,
+        market_data="futures_shadow",
+        slippage_rate=SLIPPAGE_RATE,
+        fee_rate=TAKER_FEE_RATE,
+        global_max_leverage=float(profile.exchange_leverage),
+    )
+
+
+def applied_leverage_for_profile(profile: PaperProfile, raw_leverage: Optional[float]) -> int:
+    if profile.futures_shadow:
+        return int(profile.exchange_leverage)
+    return applied_leverage_from_raw(raw_leverage)
+
+
+def safe_resolve(path: Path) -> Path:
+    return path.expanduser().resolve(strict=False)
 
 
 def run_once(
@@ -266,10 +453,19 @@ def run_once(
     now_ts: Optional[int] = None,
     defensive_probe: bool = False,
     regime_timeframe: str = "1d",
+    paper_profile: PaperProfile = DEFAULT_PAPER_PROFILE,
 ) -> dict:
+    validate_paper_profile(paper_profile)
     regime_timeframe = normalize_regime_timeframe(regime_timeframe)
+    if paper_profile.futures_shadow and defensive_probe:
+        raise ValueError("futures shadow profiles cannot be combined with defensive_probe")
+    if paper_profile.futures_shadow and regime_timeframe != "1d":
+        raise ValueError("futures shadow profiles are V0 1D baseline only")
+    if paper_profile.futures_shadow:
+        validate_paper_profile_state_dir(paper_profile, state_dir, state_dir_is_explicit=True)
     now_ts = int(now_ts or datetime.now(timezone.utc).timestamp())
     ensure_state_files(state_dir)
+    ensure_paper_profile_state(state_dir, paper_profile, now_ts)
     if defensive_probe:
         ensure_defensive_probe_log(state_dir)
     operating_state = ensure_operating_state(state_dir, now_ts)
@@ -322,6 +518,7 @@ def run_once(
         entry_pause_reason=entry_pause_reason,
         paper_start_ts=paper_start_ts,
         defensive_probe=defensive_probe,
+        paper_profile=paper_profile,
     )
     new_trade_rows.extend(entry_events)
 
@@ -348,6 +545,7 @@ def run_once(
         entry_pause_reason=entry_pause_reason,
         paper_start_ts=paper_start_ts,
         defensive_probe=defensive_probe,
+        paper_profile=paper_profile,
     )
     new_trade_rows.extend(signal_entry_events)
 
@@ -818,6 +1016,49 @@ def health_entry_pause_reason(state_dir: Path) -> str:
     return str(state.get("pause_reason") or state.get("final_block_reason") or "health_paused")
 
 
+def load_paper_profile_state(state_dir: Path) -> dict:
+    path = state_dir / PAPER_PROFILE_STATE_NAME
+    if not path.exists():
+        return {}
+    try:
+        loaded = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return loaded if isinstance(loaded, dict) else {}
+
+
+def ensure_paper_profile_state(state_dir: Path, profile: PaperProfile, now_ts: int) -> None:
+    if not profile.futures_shadow:
+        return
+    state_dir.mkdir(parents=True, exist_ok=True)
+    path = state_dir / PAPER_PROFILE_STATE_NAME
+    existing = load_paper_profile_state(state_dir)
+    existing_profile = existing.get("paper_profile")
+    if existing_profile and existing_profile != profile.profile_id:
+        raise ValueError(f"state-dir is locked to paper profile {existing_profile}")
+
+    state = {
+        **profile.state_row(),
+        "created_timestamp": existing.get("created_timestamp") or now_ts,
+        "created_time": existing.get("created_time") or format_dt(now_ts),
+        "updated_timestamp": now_ts,
+        "updated_time": format_dt(now_ts),
+        "risk_policy": {
+            "max_exchange_leverage": 3,
+            "max_effective_exposure": 1.0,
+            "futures_shadow_only": True,
+            "disabled": [
+                "5x",
+                "liquidation_touch",
+                "2x_size_75pct_or_higher",
+                "3x_size_50pct_or_higher",
+                "pure_2x_plus",
+            ],
+        },
+    }
+    path.write_text(json.dumps(state, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+
+
 def defensive_probe_entry_pause_is_regime_only(reason: str) -> bool:
     return str(reason or "").lower() in {
         "defensive_no_entry",
@@ -979,6 +1220,7 @@ def create_orders_for_signals(
     entry_pause_reason: str = "",
     paper_start_ts: int = 0,
     defensive_probe: bool = False,
+    paper_profile: PaperProfile = DEFAULT_PAPER_PROFILE,
 ) -> Tuple[List[dict], float, List[dict]]:
     existing_order_ids = {row["order_id"] for row in orders}
     events: List[dict] = []
@@ -990,7 +1232,7 @@ def create_orders_for_signals(
         order_id = paper_order_id(signal)
         if order_id in existing_order_ids:
             continue
-        order = make_order(signal, now_ts)
+        order = make_order(signal, now_ts, paper_profile=paper_profile)
         symbol = signal["symbol"]
         if symbol in positions:
             order["status"] = "rejected"
@@ -1011,6 +1253,7 @@ def create_orders_for_signals(
         paper_start_ts=paper_start_ts,
         entry_pause_reason=entry_pause_reason,
         defensive_probe=defensive_probe,
+        paper_profile=paper_profile,
     )
 
 
@@ -1024,8 +1267,10 @@ def fill_pending_orders(
     entry_pause_reason: str = "",
     paper_start_ts: int = 0,
     defensive_probe: bool = False,
+    paper_profile: PaperProfile = DEFAULT_PAPER_PROFILE,
 ) -> Tuple[List[dict], float, List[dict]]:
     events = events or []
+    config = paper_config_for_profile(paper_profile)
     latest_open = latest_known_1h_open(data, now_ts)
     if latest_open is None:
         return orders, cash, events
@@ -1051,7 +1296,7 @@ def fill_pending_orders(
         if symbol in positions:
             update_order(order, "rejected", now_ts, reason="already_open")
             continue
-        if len(positions) >= PAPER_VARIANT.max_positions:
+        if len(positions) >= config.variant.max_positions:
             update_order(order, "rejected", now_ts, reason="max_positions")
             continue
         row = data.by_time_1h.get(symbol, {}).get(fill_time)
@@ -1064,16 +1309,17 @@ def fill_pending_orders(
         if order_is_defensive_probe(order):
             order["size_multiplier"] = order.get("size_multiplier") or defensive_probe_rules.PROBE_SIZE_MULTIPLIER
             order["stop_atr_multiple"] = order.get("stop_atr_multiple") or defensive_probe_rules.PROBE_STOP_ATR_MULTIPLE
-        position, fee, reason = rb.create_position(data, PAPER_CONFIG, order, row, fill_time, index_1h, equity, positions)
+        apply_paper_profile_to_order(order, paper_profile)
+        position, fee, reason = rb.create_position(data, config, order, row, fill_time, index_1h, equity, positions)
         if not position:
             update_order(order, "rejected", now_ts, reason=reason or "position_rejected")
             continue
 
         raw_leverage = raw_position_leverage(position, equity)
-        applied_leverage = applied_leverage_from_raw(raw_leverage)
+        applied_leverage = applied_leverage_for_profile(paper_profile, raw_leverage)
         liquidation_price = rb.liquidation_price_for(position.entry_price, applied_leverage)
         # Keep PnL sizing on the raw risk-sized notional; only the paper order leverage setting is integer.
-        if PAPER_VARIANT.require_liquidation_buffer and not liquidation_buffer_is_safe(
+        if config.variant.require_liquidation_buffer and not liquidation_buffer_is_safe(
             position.entry_price,
             position.stop_price,
             applied_leverage,
@@ -1083,6 +1329,20 @@ def fill_pending_orders(
                 "rejected",
                 now_ts,
                 reason="applied_leverage_liquidation_buffer",
+                raw_leverage=raw_leverage,
+                applied_leverage=applied_leverage,
+            )
+            continue
+        if paper_profile.futures_shadow and not liquidation_buffer_is_safe(
+            position.entry_price,
+            position.stop_price,
+            applied_leverage,
+        ):
+            update_order(
+                order,
+                "rejected",
+                now_ts,
+                reason="futures_shadow_liquidation_buffer",
                 raw_leverage=raw_leverage,
                 applied_leverage=applied_leverage,
             )
@@ -1112,8 +1372,8 @@ def fill_pending_orders(
     return orders, cash, events
 
 
-def make_order(signal: dict, now_ts: int) -> dict:
-    return {
+def make_order(signal: dict, now_ts: int, paper_profile: PaperProfile = DEFAULT_PAPER_PROFILE) -> dict:
+    order = {
         "order_id": paper_order_id(signal),
         "created_time": now_ts,
         "created_date": format_dt(now_ts),
@@ -1143,6 +1403,17 @@ def make_order(signal: dict, now_ts: int) -> dict:
         "size_multiplier": signal.get("size_multiplier", ""),
         "stop_atr_multiple": signal.get("stop_atr_multiple", ""),
     }
+    apply_paper_profile_to_order(order, paper_profile)
+    return order
+
+
+def apply_paper_profile_to_order(order: dict, profile: PaperProfile) -> None:
+    if not profile.futures_shadow:
+        return
+    order["paper_profile"] = profile.profile_id
+    order["exchange_leverage"] = int(profile.exchange_leverage)
+    order["size_multiplier"] = profile.size_multiplier
+    order["effective_exposure"] = profile.effective_exposure
 
 
 def update_order(order: dict, status: str, now_ts: int, reason: str = "", **values) -> None:
@@ -1471,6 +1742,7 @@ def build_dashboard(
     lines = [
         "# Alpha Engine v1.2 Paper Dashboard",
         "",
+        *paper_profile_report_lines(state_dir),
         f"- current_regime: {current_regime.get('trade_regime') or current_regime.get('regime') or ''}",
         f"- current_action_bias: {current_regime.get('trade_action_bias') or current_regime.get('action_bias') or ''}",
         f"- strategy_status: {status}",
@@ -1488,6 +1760,22 @@ def build_dashboard(
         position_table(positions),
     ]
     return "\n".join(lines)
+
+
+def paper_profile_report_lines(state_dir: Path) -> List[str]:
+    profile = load_paper_profile_state(state_dir)
+    if not profile:
+        return []
+    leverage = int(float(profile.get("exchange_leverage") or 1))
+    size_multiplier = float(profile.get("size_multiplier") or 1.0)
+    effective = float(profile.get("effective_exposure") or leverage * size_multiplier)
+    return [
+        f"- paper_profile: {profile.get('paper_profile', '')}",
+        f"- paper_mode: {profile.get('mode', '')}",
+        f"- exchange_leverage: {leverage}x",
+        f"- size_multiplier: {size_multiplier:.2f}",
+        f"- effective_exposure: {effective:.2f}x",
+    ]
 
 
 def maybe_write_daily_report(state_dir: Path, now_ts: int) -> None:
@@ -1522,6 +1810,7 @@ def daily_report_text(state_dir: Path, now_ts: int) -> str:
     lines = [
         f"# Alpha Engine v1.2 Paper Daily Report {today}",
         "",
+        *paper_profile_report_lines(state_dir),
         f"- equity: {float(latest.get('equity') or INITIAL_CASH):.6f}",
         f"- cumulative_pnl: {float(latest.get('cumulative_pnl') or 0.0):.6f}",
         f"- open_positions: {latest.get('open_positions') or 0}",
